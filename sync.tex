@@ -1,0 +1,873 @@
+
+\section{Thread Synchronization}
+\label{sec:thread-synchronization}
+
+In order to effectively work together the threads in a program usually need to share information
+or coordinate their activity. Many ways to do this have been devised and such techniques usually
+go under the name of \newterm{thread synchronization}. In this section I will outline several
+common methods of thread synchronization and show how they can be done using POSIX threads.
+
+\subsection{Mutual Exclusion}
+\label{subsec:mutual-exclusion}
+
+When writing multi-threaded programs it is frequently necessary to enforce mutually exclusive
+access to a shared data object. This is done with mutex objects. The idea is to associate a
+mutex with each shared data object and then require every thread that wishes to use the shared
+data object to first lock the mutex before doing so. Here are the particulars
+
+\begin{enumerate}
+
+\item Declare an object of type \snippet{pthread\_mutex\_t}.
+
+\item Initialize the object by calling \snippet{pthread\_mutex\_init()} or by using the special
+  static initializer \snippet{PTHREAD\_\-MUTEX\_\-INITIALIZER}.
+  
+\item Call \snippet{pthread\_mutex\_lock()} to gain exclusive access to the shared data object.
+
+\item Call \snippet{pthread\_mutex\_unlock()} to release the exclusive access and allow another
+  thread to use the shared data object.
+
+\item Get rid of the object by calling \snippet{pthread\_mutex\_destroy()}.
+
+\end{enumerate}
+
+The program of Listing~\ref{lst:mutex-example} demonstrates the basic approach. It is important
+to understand that if a thread attempts to lock the mutex while some other thread has it locked,
+the second thread is blocked until the first releases the mutex with
+\snippet{pthread\_mutex\_unlock()}.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in, caption={Mutex
+Example},label=lst:mutex-example]
+#include <pthread.h>
+#include <unistd.h>
+
+pthread_mutex_t lock;
+int shared_data;
+  // Often shared data is more complex than just an int.
+
+void *thread_function(void *arg)
+{
+  int i;
+
+  for (i = 0; i < 1024*1024; ++i) {
+    // Access the shared data here.
+    pthread_mutex_lock(&lock);
+    shared_data++;
+    pthread_mutex_unlock(&lock);
+  }
+  return NULL;
+}
+
+int main(void)
+{
+  pthread_t thread_ID;
+  void     *thread_result;
+  int       i;
+
+  // Initialize the mutex before trying to use it.
+  pthread_mutex_init(&lock, NULL);
+
+  pthread_create(&thread_ID, NULL, thread_function, NULL);
+
+  // Try to use the shared data.
+  for (i = 0; i < 10; ++i) {
+    sleep(1);
+    pthread_mutex_lock(&lock);
+    printf("\rShared integer's value = %d\n", shared_data);
+    pthread_mutex_unlock(&lock);
+  }
+  printf("\n");
+
+  pthread_join(thread_ID, &thread_result);
+
+  // Clean up the mutex when we are finished with it.
+  pthread_mutex_destroy(&lock);
+  return 0;
+}
+\end{lstlisting}
+
+The code above uses dynamic initialization. However, it is also possible to initialize a mutex
+object statically using the special symbol \snippet{PTHREAD\_\-MUTEX\_\-INITIALIZER} as the
+initializer.
+
+Be sure to observe these points
+
+\begin{enumerate}
+
+\item No thread should attempt to lock or unlock a mutex that has not been initialized.
+
+\item The thread that locks a mutex \emph{must} be the thread that unlocks it.
+
+\item No thread should have the mutex locked when you destroy the mutex.
+
+\end{enumerate}
+
+In practice it is sometimes the case that threads are blocked on mutex objects when the program
+wishes to terminate. In such a situation it might make sense to \snippet{pthread\_cancel()}
+those threads before destroying the mutex objects they are blocked on. Coordinating this
+properly can be tricky, however.
+
+Notice that it is possible to assign special ``mutex attributes'' to a mutex object when it is
+created. This is done by creating a mutex attribute object, assigning attributes to the object,
+and then passing a pointer to the attribute object into \snippet{pthread\_mutex\_init()}. The
+program in Listing~\ref{lst:mutex-example} just calls for default attributes by providing a
+\snippet{NULL} pointer instead. In many cases this is perfectly adequate. The use of mutex
+attribute objects is beyond the scope of this document.
+
+\subsubsection*{Exercises}
+
+\begin{enumerate}
+  
+\item Enter the program in Listing~\ref{lst:mutex-example} and try it out. Does it behave the
+  way you expected? Try different values for the maximum loop index in the thread function and
+  different sleep times in the main function. Try removing the call to \snippet{sleep()}
+  entirely. Try the program on different machines. Can you explain what is happening?
+
+\item Suppose you are building a C++ string class that you intend to use in a multi-threaded
+  program. You are worried about your string objects possibly getting corrupted if they are
+  updated by more than one thread at a time. You consider adding a mutex as a member of each
+  string and locking that mutex whenever any string method is called. Discuss the implications
+  of this design. Be careful: this question is considerably trickier than it may appear!
+
+\end{enumerate}
+
+\subsection{Barriers}
+\label{subsec:barriers}
+
+A barrier is a synchronization primitive that forces multiple threads to reach the same point in
+the program before they are allowed to continue. If a thread arrives at the barrier early it
+will be suspended until the appropriate number of other threads arrive. Once the last thread has
+reached the barrier, all the waiting threads are released and the threads can proceed
+concurrently once again.
+
+Barriers tend to be useful when multiple threads are executing different iterations of the same
+loop. Often it is necessary to be sure all loop iterations are complete before moving on to a
+task that requires the previous work to be entirely finished.
+
+Listing~\ref{lst:barrier-example} shows a skeleton that illustrates how barriers can be used and
+the context in which they might be useful. In this listing all threads execute the same thread
+function but process different iterations of the \snippet{for} loop.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in, caption={Barrier
+Example},label=lst:barrier-example]
+#include <pthread.h>
+
+void *thread_function(void *arg)
+{
+  int i;
+  int done = 0;
+  struct TaskArg *thread_arg = (struct TaskArg *)arg;
+
+  while (!done) {
+    for (i = thread_arg->start; i < thread_arg->end; ++i) {
+      // Work on loop iteration i
+      // Different threads do different iterations.
+    }
+
+    if (pthread_barrier_wait(&loop_barrier) ==
+          PTHREAD_BARRIER_SERIAL_THREAD) {
+
+      // Prepare for next cycle.
+      if (nothing_more) done = 1;
+    }
+    pthread_barrier_wait(&prep_barrier);
+  }
+  return NULL;
+}
+\end{lstlisting}
+
+Two barriers are used. The first causes all threads to synchronize after the \snippet{for} loop
+executes so that the preparation for the next cycle can be done knowing that the previous cycle
+has fully completed. The barrier wait function returns the special value
+\snippet{PTHREAD\_\-BARRIER\_\-SERIAL\_\-THREAD} in exactly one thread (chosen arbitrarily).
+That thread is thus ``elected'' to take care of any serial work needed between cycles. In this
+program there is no attempt to prepare for the next cycle in parallel.
+
+The other threads immediately wait on the next barrier for the serial thread to catch up. Once
+the preparation is fully completed, they are all released from the second barrier where they
+loop back to do the next cycle of work.
+
+This style of programming occurs frequently when writing truly parallel programs that expect
+the threads to be physically executing at the same time. Such programs often use multiple
+threads to complete different parts of the same task and use a barrier to be sure the task is
+finished before allowing the higher level program logic to continue.
+
+Barriers are instances of the \snippet{pthread\_barrier\_t} type. They are initialized with
+\snippet{pthread\_barrier\_init} and cleaned up with \snippet{pthread\_barrier\_destroy}.
+Listing~\ref{lst:barrier-main} shows a main function that uses the parallel looping function of
+Listing~\ref{lst:barrier-example}.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in, caption={Barrier
+Example Main},label=lst:barrier-main]
+pthread_barrier_t loop_barrier;
+pthread_barrier_t prep_barrier;
+
+int main(void)
+{
+  int i;
+  pthread_t *thread_IDs;
+
+  pthread_barrier_init(&loop_barrier, NULL, processor_count);
+  pthread_barrier_init(&prep_barrier, NULL, processor_count);
+  thread_IDs =
+    (pthread_t *)malloc(processor_count * sizeof(pthread_t));
+
+  // Create a thread for each CPU.
+  for (i = 0; i < processor_count; ++i) {
+    struct TaskArg *task =
+      (struct TaskArg *)malloc(sizeof(struct TaskArg));
+    task->start = i * iterations_per_processor;
+    if (i == processor_count - 1)
+      task->end = ITERATION_COUNT;
+    else
+      task->end = (i + 1) * iterations_per_processor;
+    pthread_create(&thread_IDs[i],NULL,thread_function,task);
+  }
+
+  // Wait for threads to end.
+  for (i = 0; i < processor_count; ++i) {
+    pthread_join(thread_IDs[i], NULL);
+  }
+
+  free(thread_IDs);
+  pthread_barrier_destroy(&loop_barrier);
+  pthread_barrier_destroy(&prep_barrier);
+  return 0;
+}
+\end{lstlisting}
+
+The barrier objects themselves are global so they can be accessed by all threads. Alternatively
+they could have been made local to the main function and passed into each thread indirectly by
+way of the thread's arguments. In any case it is necessary for all threads to see the same
+barrier object.
+
+When the barrier objects are initialized it is necessary to provide the number of threads that
+can accumulate on the barrier. For example a barrier initialized with a count of five will cause
+threads to wait until the fifth thread arrives. This count can't be changed once the barrier
+object has been initialized.
+
+This listing creates as many threads as there are processors using a previously defined variable
+\snippet{processor\_count} (declaration not shown). Since the number of processors is unknown
+when the program is written space for the thread IDs is allocated dynamically.
+
+\subsubsection*{Exercises}
+
+\textit{I need something here!}
+
+\subsection{Condition Variables}
+\label{subsec:condition-vars}
+
+If you want one thread to signal an event to another thread, you need to use \newterm{condition
+  variables}. The idea is that one thread waits until a certain condition is true. First it
+tests the condition and, if it is not yet true, calls \snippet{pthread\_cond\_wait()} to block
+until it is. At some later time another thread makes the condition true and calls
+\snippet{pthread\_cond\_signal()} to unblock the first thread.
+
+Every call to \snippet{pthread\_cond\_wait()} should be done as part of a conditional statement.
+If you aren't doing that, then you are most likely using condition variables incorrectly. For
+example
+
+\begin{lstlisting}
+if (flag == 0) pthread_cond_wait(...);
+\end{lstlisting}
+
+Here I'm waiting until the flag is not zero. You can test conditions of any complexity. For
+example
+
+\begin{lstlisting}
+x = f(a, b);
+if (x < 0 || x > 9) pthread_cond_wait(...);
+\end{lstlisting}
+
+Here I'm waiting until \snippet{x} is in the range from zero to nine inclusive where \snippet{x}
+is computed in some complex way. Note that \snippet{pthread\_cond\_wait()} is only called if the
+condition is not yet true. If the condition is already true, \snippet{pthread\_cond\_wait()} is
+not called. This is necessary because condition variables do not remember that they have been
+signaled.
+
+If you look at my examples, you will see that there is a serious race condition in them. Suppose
+the condition is not true. Then suppose that after the condition is tested but before
+\snippet{pthread\_cond\_wait()} is called, the condition becomes true. The fact that the
+condition is signaled (by some other thread) will be missed by \snippet{pthread\_cond\_wait()}.
+The first thread will end up waiting on a condition that is already true. If the condition is
+never signaled again the thread will be stuck waiting forever.
+
+To deal with this problem, every time you use a condition variable you must also use a mutex to
+prevent the race condition. For example:
+
+\begin{lstlisting}
+pthread_mutex_lock(&mutex);
+x = f(a, b);
+if (x < 0 || x > 9) pthread_cond_wait(&condition, &mutex);
+pthread_mutex_unlock(&mutex);
+\end{lstlisting}
+
+The thread that signals this condition will use the same mutex to gain exclusive access to the
+whatever values are involved in computing the condition (which depends on what function
+\snippet{f} does in this example). Thus there is no way that the signaling could occur between
+the test of the condition and the waiting on the condition.
+
+For the above to work, \snippet{pthread\_cond\_wait()} needs to wait on the condition and unlock
+the mutex as an atomic action. It does this, but it needs to know which mutex to unlock. Hence
+the need for the second parameter of \snippet{pthread\_cond\_wait()}. When the condition is
+signaled, \snippet{pthread\_cond\_wait()} will lock the mutex again before returning so that the
+\snippet{pthread\_mutex\_unlock()} in the above example is appropriate regardless of which
+branch of the if is taken.
+
+Here is how the signaling thread might look
+
+\begin{lstlisting}
+pthread_mutex_lock(&mutex);
+a = ...
+b = ...
+x = f(a, b);
+if (x >= 0 && x <= 9) pthread_cond_signal(&condition);
+pthread_mutex_unlock(&mutex);
+\end{lstlisting}
+
+Before doing a computation that might change the condition, the signaling thread locks the mutex
+to make sure the waiting thread can't get caught in a race condition. For example, in this case
+it wouldn't do if the \emph{waiting} thread saw a new version of \snippet{a} but the old version
+of \snippet{b}. In that case it might calculate an inappropriate value of \snippet{f(a, b)} and
+wait when it shouldn't.
+
+There is a further subtlety regarding the use of condition variables. In certain situations the
+wait function might return even though the condition variable has not actually been signaled.
+For example, if the Unix process in general receives an operating system signal, the thread
+blocked in \snippet{pthread\_cond\_wait()} might be elected to process the signal handling
+function. If system calls are not restarting (the default in many cases) the
+\snippet{pthread\_cond\_wait()} call might return with an interrupted system call error
+code\footnote{Of course this assumes you are dealing with an actual kernel thread. If the thread
+  is purely a user mode thread such unexpected returns won't occur.}. This has nothing to do
+with the state of the condition so proceeding as if the condition is true would be
+inappropriate.
+
+The solution to this problem is to simply retest the condition after
+\snippet{pthread\-\_cond\-\_wait()} returns. This is most easily done using a loop. For example
+
+\begin{lstlisting}
+pthread_mutex_lock(&mutex);
+while (1) {
+  x = f(a, b);
+  if (x < 0 || x > 9) pthread_cond_wait(&condition, &mutex);
+    else break;
+}
+pthread_mutex_unlock(&mutex);
+\end{lstlisting}
+
+Of course this assumes you want to ignore any spurious returns from the wait function. In a more
+complex application you might want to process the error codes in various ways depending on the
+situation.
+
+The \snippet{pthread\_cond\_signal} function releases only one thread at a time. In some cases
+it is desirable to release all threads waiting on a condition. This can be accomplished using
+\snippet{pthread\_cond\_broadcast}. For example
+
+\begin{lstlisting}
+pthread_mutex_lock(&mutex);
+a = ...
+b = ...
+x = f(a, b);
+if (x >= 0 && x <= 9) pthread_cond_broadcast(&condition);
+pthread_mutex_unlock(&mutex);
+\end{lstlisting}
+
+The example in Listing~\ref{lst:cond-example} illustrates the use of condition variables in the
+context of a program. Although contrived, this example is at least complete and compilable.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in,
+  caption={Condition Variable Example},label=lst:cond-example]
+#include <pthread.h>
+#include <unistd.h>
+
+pthread_cond_t  is_zero;
+pthread_mutex_t mutex;   // Condition variables needs a mutex.
+int shared_data = 32767; // Or some other large number.
+
+void *thread_function(void *arg)
+{
+  // Imagine doing something useful.
+  while (shared_data > 0) {
+    // The other thread sees the shared data consistently.
+    pthread_mutex_lock(&mutex);
+    --shared_data;
+    pthread_mutex_unlock(&mutex);
+  }
+  
+  // Signal the condition.
+  pthread_cond_signal(&is_zero);
+  return NULL;
+}
+
+int main(void)
+{
+  pthread_t thread_ID;
+  void     *exit_status;
+  int       i;
+
+  pthread_cond_init(&is_zero, NULL);
+  pthread_mutex_init(&mutex, NULL);
+
+  pthread_create(&thread_ID, NULL, thread_function, NULL);
+
+  // Wait for the shared data to reach zero.
+  pthread_mutex_lock(&mutex);
+  while (shared_data != 0)
+    pthread_cond_wait(&is_zero, &mutex);
+  pthread_mutex_unlock(&mutex);
+
+  pthread_join(thread_ID, &exit_status);
+
+  pthread_mutex_destroy(&mutex);
+  pthread_cond_destroy(&is_zero);
+  return 0;
+}
+\end{lstlisting}
+
+Notice that in this program the condition variables are also initialized and destroyed by calls
+to appropriate functions. As with mutex variables you can also initialize condition variables
+statically using a special symbol: \snippet{PTHREAD\_\-COND\_\-INITIALIZER}.
+
+\subsubsection*{Exercises}
+
+\begin{enumerate}
+  
+\item Modify the program in Listing~\ref{lst:cond-example} to print messages and add delays (or
+  wait for user input) at various places so you can verify that the thread is, in fact, waiting
+  for the condition as appropriate. Verify that the thread does not wait if the condition is
+  already true when it is first tested.
+
+\item In the text above, when a condition is signaled the signaling thread calls
+  \snippet{pthread\_cond\_signal()} before unlocking the mutex. However, it is also possible
+  swap those operations as shown below.
+
+\begin{lstlisting}
+pthread_mutex_lock(&mutex);
+a = ...
+b = ...
+x = f(a, b);
+pthread_mutex_unlock(&mutex);
+if (x >= 0 && x <= 9) pthread_cond_signal(&condition);
+\end{lstlisting}
+
+Does this result in the same behavior as before? Are any race conditions introduced (or fixed)
+by this change? How does this approach impact application performance?
+
+\end{enumerate}
+
+\subsection{Semaphores}
+\label{subsec:semaphores}
+
+Semaphore are essentially glorified integer counters. They support two primary operations. One
+operation, called \newterm{down} or \newterm{wait}, attempts to decrement the counter. The other
+operation, called \newterm{up}, \newterm{signal}, or \newterm{post} attempts to increment the
+counter. What makes semaphores special is that if a thread tries to wait on a zero semaphore it
+is blocked instead. Later when another thread posts the semaphore the blocked thread is
+activated while the semaphore remains at zero. In effect, the posting causes the semaphore to be
+incremented but then the thread that was blocked trying to do a wait is allowed to proceed,
+causing the semaphore to be immediately decremented again.
+
+If multiple threads are blocked waiting on a semaphore then the system chooses one to unblock.
+Exactly how this choice is made is generally system dependent. You can not assume that it will
+be in FIFO order\footnote{If threads have different priorities, normally the highest priority
+  thread is allowed to go first.}. However, the order in which the threads are unblocked is not
+normally a concern. If it is, then your program may not be very well designed.
+
+A semaphore with an initial value of one can be used like a mutex. When a thread wishes to enter
+its critical section and access a shared data structure, it does a wait operation on the
+semaphore. If no other thread is in its critical section, the semaphore will have its initial
+value of one and the wait will return immediately. The semaphore will then be zero. If another
+thread tries to wait on the semaphore during this time it will be blocked. When the first thread
+is finished executing its critical section it does a post operation on the semaphore. This will
+unblock one waiting thread or, if there are no waiting threads, increment the semaphore back to
+its initial value of one. A semaphore used in this way is called a \newterm{binary semaphore}
+because it has exactly two states.
+
+However, because semaphores are integers they can take on values larger than one. Thus they are
+often used to count scarce resources. For example a thread might wait on a semaphore to
+effective reserve one item of a resource. If there are no items left, the semaphore will be zero
+and the wait operation will block. When a thread is finished using an item of a resource it
+posts the semaphore to either increment the count of available items or to allow a blocked
+thread to access the now available item. A semaphore used in this way is called a
+\newterm{counting semaphore}.
+
+The POSIX semaphore API is not really part of the normal pthread API. Instead POSIX standardizes
+semaphores under a different API. Traditional Unix systems support shared memory, message
+queues, and semaphores as part of what is called ``System V Interprocess Communication'' (System
+V IPC). POSIX also provides shared memory, message queues, and semaphores as a package that
+competes with, or replaces, the older standard. The functionality of the two systems is similar
+although the details of the two APIs are different.
+
+Note that POSIX semaphores, like System V IPC semaphores, can be used to synchronize two or more
+separate processes. This is different than pthread mutexes. A mutex can only be used by threads
+in the same process. Because POSIX semaphores can be used for interprocess communication, they
+have the option of being named. One process can create a semaphore under a particular name and
+other processes can open that semaphore by name. In this tutorial, however, I will focus only on
+synchronizing threads in the same process.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in,
+  caption={Semaphore Example},label=lst:semaphore-example]
+#include <semaphore.h>
+
+int   shared;
+sem_t binary_sem;  // Used like a mutex.
+
+void *thread_function(void *arg)
+{
+  sem_wait(&binary_sem);    // Decrements count.
+  // Used shared resource.
+  sem_post(&binary_sem);    // Increments count.
+}
+
+void main(void)
+{
+  sem_init(&binary_sem, 0, 1); // Initial count of 1.
+  
+  // Start threads here.
+  
+  sem_wait(&binary_sem);
+  // Use shared resource.
+  sem_post(&binary_sem);
+  
+  // Join with threads here.
+  
+  sem_destroy(&binary_sem);
+  return 0;
+}
+\end{lstlisting}
+
+The skeleton program in Listing~\ref{lst:semaphore-example} shows how to initialize, clean up,
+and use a POSIX semaphore. For brevity the skeleton program does not show the threads being
+created or joined nor does it show any error handling. See the manual pages for the various
+functions for more information on error returns.
+
+Another difference between a pthread mutex and a semaphore is that, unlike a mutex, a semaphore
+can be posted in a different thread than the thread that does the wait operation. This is
+necessary when using a semaphore to count instances of a scarce resource. The skeleton program
+in Listing~\ref{lst:semaphore-example} is using a semaphore like a mutex. I did this to simplify
+the listing so that the functions used to manipulate the semaphore would be clear.
+
+To see semaphores being used in a more interesting way, consider the classic producer/consumer
+problem. In this problem one thread is producing items (say, objects of type \snippet{void *}
+that might be pointing at other objects of arbitrary complexity) while another thread is
+consuming those items. Listing~\ref{lst:pcbuffer-header} shows an abstract data type that
+implements a buffer that can be used to hold items as they pass from one thread to another.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in,
+  caption={Producer/Consumer Abstract Type},label=lst:pcbuffer-header]
+#ifndef PCBUFFER_H
+#define PCBUFFER_H
+
+#include <pthread.h>
+#include <semaphore.h>
+
+#define PCBUFFER_SIZE 8
+
+typedef struct {
+  void *buffer[PCBUFFER_SIZE];
+  pthread_mutex_t lock;
+  sem_t           used;
+  sem_t           free;
+  int             next_in;   // Next available slot.
+  int             next_out;  // Oldest used slot.
+} pcbuffer_t;
+
+void  pcbuffer_init(pcbuffer_t *);
+void  pcbuffer_destroy(pcbuffer_t *);
+void  pcbuffer_push(pcbuffer_t *, void *);
+void *pcbuffer_pop(pcbuffer_t *);
+
+#endif
+\end{lstlisting}
+
+The solution actually needs two semaphores. One is used to count the number of free slots in the
+buffer and the other is used to count the number of used slots. This is necessary because we
+must block the producer when the buffer is full and we must block the consumer when the buffer
+is empty. However, semaphores only block their caller when one attempts to decremented them
+below zero; they never block when they are incremented.
+Listing~\ref{lst:pcbuffer-implementation} shows the implementation in detail.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in,
+  caption={Producer/Consumer Implementation},label=lst:pcbuffer-implementation]
+#include "pcbuffer.h"
+
+void pcbuffer_init(pcbuffer_t *p) {
+  pthread_mutex_init(&p->lock);
+  sem_init(&p->used, 0, 0);
+  sem_init(&p->free, 0, PCBUFFER_SIZE);
+  p->next_in  = 0;
+  p->next_out = 0;
+}
+
+void pcbuffer_destroy(pcbuffer_t *p) {
+  pthread_mutex_destroy(&p->lock);
+  sem_destroy(&p->used);
+  sem_destroy(&p->free);
+}
+
+void pcbuffer_push(pcbuffer_t *p, void *value) {
+  sem_wait(&p->free);
+  pthread_mutex_lock(&p->lock);
+  p->buffer[p->next_in++] = value;
+  if (next_in == PCBUFFER_SIZE) next_in = 0;
+  pthread_mutex_unlock(&p->lock);
+  sem_post(&p->used);
+}
+
+void *pcbuffer_pop(pcbuffer_t *p) {
+  void *return_value;
+
+  sem_wait(&p->used);
+  pthread_mutex_lock(&p->lock);
+  return_value = p->buffer[p->next_out++];
+  if (next_out == PCBUFFER_SIZE) next_out = 0;
+  pthread_mutex_unlock(&p->lock);
+  sem_post(&p->free);
+  return return_value;
+}
+\end{lstlisting}
+
+The initialization and clean-up functions are straight forward. In contrast the push and pop
+functions are surprisingly subtle. In each it is necessary to first reserve a unit of the
+limited resource. In the case of \snippet{pcbuffer\_push()} we must reserve a free slot. If no
+free slots are available, the call to \snippet{sem\_wait(\&p->free)} will block until the
+consumer posts that semaphore after removing an item.
+
+Once a slot has been reserved we lock the buffer to ensure that no other thread can corrupt it
+by modifying it at the same time. Finally, after unlocking we post the other semaphore to
+perhaps unblock the other thread as necessary. For example the call to
+\snippet{sem\_signal(\&p->used)} will unblock a waiting consumer to handle the item just stored
+in the buffer.
+
+\subsubsection*{Exercises}
+
+\begin{enumerate}
+
+\item Using POSIX mutex and condition variables, implement a semaphore abstract type. For
+  example, consider a header file containing the following.
+
+\begin{lstlisting}
+typedef struct {
+  // Fill in members as appropriate.
+} semaphore_t;
+
+void semaphore_init(
+  struct semaphore *s, int initial_count);
+void semaphore_destroy(semaphore_t *s);
+void semaphore_up(semaphore_t *s);
+void semaphore_down(semaphore_t *s);
+\end{lstlisting}
+
+Implement the functions declared above. This shows that semaphores are not strictly necessary as
+part of a low level API.
+
+\item Some semaphore APIs (such as the Win32 API) allow the post operation to advance the value
+  of a semaphore by more than one. This can be implemented by executing a basic post operation
+  multiple times in a loop. However, such an approach is inefficient if the number to be added
+  to the semaphore is large. Extend your solution for the question above so that
+  \snippet{semaphore\_up} takes an additional integer parameter specifying the how much the
+  semaphore value is to be advanced. Try to use an efficient method of handling large advances.
+  Make sure your solution works properly and does not suffer from any race conditions even when
+  there are multiple threads waiting on the semaphore.
+
+\end{enumerate}
+
+\subsection{Reader/Writer Locks}
+\label{subsec:reader-writer}
+
+Mutex objects provide mutually exclusive access to a shared resource. But sometimes complete
+mutual exclusion is unnecessarily restrictive. If two threads are only interested in reading a
+shared resource, it should be possible to allow both to access the resource at the same time. If
+neither thread tries to modify the resource, the resource will never be in an inconsistent state
+and simultaneous access is safe. Indeed, it is common for there to be multiple threads trying to
+read a shared resource where updates to that resource are uncommon. For example a tree data
+structure might be used many times by multiple threads to look up information and yet updated
+only rarely by a single thread.
+
+To support this usage POSIX provides \newterm{reader/writer locks}. Multiple readers can lock
+such an object without blocking each other, but when a single writer acquires the lock it has
+exclusive access to the resource. All following readers or writers will block as long as a
+writer holds the lock.
+
+The skeleton program in Listing~\ref{lst:rwlock-example} shows the basic structure. By now the
+pattern of initialization, destruction, and use should look familiar. In a more typical program
+the thread function where the read lock is acquired might be executed by many threads while the
+main function where the write lock is needed might be executed by only one thread. Notice in
+this case that the same function is used to unlock both read locks and write locks.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in,
+  caption={Reader/Writer Lock Example},label=lst:rwlock-example]
+#include <pthread.h>
+
+int              shared;
+pthread_rwlock_t lock;
+
+void *thread_function(void *arg)
+{
+  pthread_rwlock_rdlock(&lock);
+  // Read from the shared resource.
+  pthread_rwlock_unlock(&lock);
+}
+
+void main(void)
+{
+  pthread_rwlock_init(&lock, NULL);
+  
+  // Start threads here.
+  
+  pthread_rwlock_wrlock(&lock);
+  // Write to the shared resource.
+  pthread_rwlock_unlock(&lock);
+  
+  // Join with threads here.
+  
+  pthread_rwlock_destroy(&lock);
+  return 0;
+}
+\end{lstlisting}
+
+Depending on the implementation, a steady stream of readers might permanently lock out a writer.
+This situation is called \newterm{writer starvation}. On the other hand if the implementation
+favors writers in the sense of letting waiting writers obtain the lock as soon as possible,
+\newterm{reader starvation} may occur. The POSIX standard favors writers, depending on specific
+thread priorities. This behavior is reasonable because writers are presumed to be rare and the
+updates they want to do are presumed to be important. It is more realistic to expect a steady
+stream of readers than a steady stream of writers. Thus if readers were favored, writer
+starvation would be a significant concern.
+
+It is important to note that the system does not (can not) enforce the read-only restriction on
+reader threads. There is nothing to stop a thread from acquiring a read lock and then go ahead
+and write to the shared resource anyway. If multiple reader threads do this, data corruption
+might occur. It is the programmer's responsibility to ensure this does not happen.
+
+\subsubsection*{Exercises}
+
+\begin{enumerate}
+
+\item Implement a reader/writer lock abstract type in terms of other POSIX synchronization
+  primitives. Can your implementation cause reader or writer starvation?
+
+\end{enumerate}
+
+\subsection{Monitors}
+\label{sec:monitors}
+
+The synchronization primitives discussed so far are all fairly primitive. This makes them
+flexible but it also makes them difficult to use properly. A synchronization abstraction that is
+commonly provided by programming languages with direct support for concurrency is the
+\newterm{monitor}. Essentially a monitor is an encapsulation of data and code with the property
+that only one thread at a time can be inside the monitor. Thus mutual exclusion is provided
+automatically by the monitor construct.
+
+The POSIX thread API does not support monitors directly but because it is a useful facility
+there is value in exploring how a monitor could be implemented with the POSIX thread API. Since
+C is a relatively primitive language, the syntactic features for declaring and using monitors
+are not directly available. Instead the programmer must adhere to certain programming
+conventions. This is typical of programming in the C environment.
+
+Listing~\ref{lst:basic-monitor} illustrates the general approach. The monitor maps to a single
+translation unit (source file) where the internal data and support functions have internal
+linkage (marked as \snippet{static}). A master mutex object is used to control access to the
+monitor. The monitor operations are ordinary external functions with the property that they lock
+the mutex on entry and unlock it on exit. Care must be taken by the programmer to ensure that
+the mutex is properly unlocked on every exit path from those functions. In addition, the
+external functions can't call each other without risking deadlock on the monitor
+mutex\footnote{Unless the monitor mutex is a recursive mutex.}.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in,
+  caption={Basic Monitor},label=lst:basic-monitor]
+#include "service.h"
+
+static pthread_mutex_t monitor_lock =
+  PTHREAD_MUTEX_INITIALIZER;
+
+static int internal_data;
+
+static void internal_function( void ) { ... }
+
+void service_function( void )
+{
+    pthread_mutex_lock(&monitor_lock);
+    ...
+    // Use internal data and functions freely.
+    ...
+    pthread_mutex_unlock(&monitor_lock);
+}
+\end{lstlisting}
+
+Associated with the monitor is a header file that declares any externally visible service
+functions and the types they require. Multiple threads can call these service functions safely.
+Only one thread at a time is allowed inside the monitor so the internal data will never
+experience simultaneous updates.
+
+In the case where some service functions only read the internal data, it may make sense to use a
+POSIX reader/writer lock as the monitor lock. Functions that only read the data can obtain a
+read lock on the monitor, allowing several threads to call such functions simultaneously. Of
+course functions that update the internal data will need to obtain a write lock on the monitor.
+
+Unfortunately mutual exclusion inside the monitor is not enough to make the monitor construct
+generally useful. In many situations it is necessary for a thread to suspend itself inside the
+monitor while waiting for a certain condition to be true (for example, for data to be ready,
+etc). Naturally the monitor must be unlocked when the thread is suspended so that another thread
+is allowed inside the monitor. If this were not done, the suspended thread would wait forever
+for a condition that could never arise.
+
+POSIX condition variables are a good fit for these semantics. The suspending thread can call
+\snippet{pthread\_cond\_wait} on an internal condition variable, passing the monitor lock as the
+second parameter. This will suspend the thread and unlock the monitor in an atomic manner. When
+another thread signals the condition, the first thread will attempt to reacquire the mutex
+before continuing. It will be prevented from doing this until the signaling thread leaves the
+monitor (since the signaling thread will still hold the monitor mutex). Thus the rule that only
+a single thread executes in the monitor at a time is enforced. Listing~\ref{lst:monitor-example}
+illustrates the approach.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in,
+  caption={Monitor Example},label=lst:monitor-example]
+#include "service.h"
+
+static pthread_mutex_t monitor_lock =
+  PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t condition =
+  PTHREAD_COND_INITIALIZER;
+
+void service_function1( void )
+{
+    pthread_mutex_lock(&monitor_lock);
+    ...
+    while (!data_ready( )) {
+      pthread_cond_wait(&condition, &monitor_lock);
+    }
+    ...
+    pthread_mutex_unlock(&monitor_lock);
+}
+
+void service_function2( void )
+{
+    pthread_mutex_lock(&monitor_lock);
+    ...
+    make_data_ready( );
+    pthread_cond_signal(&condition);
+    ...
+    pthread_mutex_unlock(&monitor_lock);
+}
+\end{lstlisting}
+
+In this example the functions \snippet{data\_ready} and \snippet{make\_data\_ready} are assumed
+to be internal monitor functions (not shown in Listing~\ref{lst:monitor-example}). Notice that
+it is important to test the condition in a loop when calling the wait operation. This is to
+protect against spurious wake-ups (for example due to operating system signals). It also
+protects against another problem: When the signaling thread leaves the monitor, some other
+thread waiting to enter the monitor might acquire the mutex before the awakened thread does so.
+This other thread might then invalidate the condition before the awakened thread is able to
+return from \snippet{pthread\_cond\_wait}. Thus retesting the condition before continuing from
+the wait is a must.
+
+\subsubsection*{Exercises}
+
+\begin{enumerate}
+
+\item POSIX conditional waits take a pointer to a mutex object. However, if one wants to use a
+  reader/writer lock to control access to the monitor, \snippet{pthread\_cond\_wait} can't be
+  used directly. How can this be handled?
+
+\end{enumerate}

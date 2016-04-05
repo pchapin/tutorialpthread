@@ -1,0 +1,234 @@
+
+\section{Creating and Destroying Threads}
+\label{sec:createdestroy-threads}
+
+Clearly the first step required in understanding how to build a multi-threaded program is to
+understand how to create and destroy threads. There are a number of subtle issues associated
+with this topic. Normally one wants to not only create a thread but also to send that thread one
+or more parameters. Furthermore when a thread ends, one normally wants to be able to retrieve one
+or more values that are returned from the thread. In this section I will describe how these
+things can be done with pthreads.
+
+\subsection{Creating Threads}
+\label{subsec:creating-threads}
+
+To create a new thread you need to use the \snippet{pthread\_create()} function.
+Listing~\ref{lst:skeleton} shows a skeleton program that creates a thread that does nothing and
+then waits for the thread to terminate.
+
+\begin{lstlisting}[float=tp,frame=single,xleftmargin=0in,
+  caption={Skeleton Thread Program},label=lst:skeleton]  
+#include <pthread.h>
+
+/*
+ * The function to be executed by the thread should take a
+ * void* parameter and return a void* result.
+ */
+void *thread_function(void *arg)
+{
+  // Cast the parameter into whatever type is appropriate.
+  int *incoming = (int *)arg;
+
+  // Do whatever is necessary using *incoming as the argument.
+
+  // The thread terminates when this function returns.
+  return NULL;
+}
+
+int main(void)
+{
+  pthread_t thread_ID;
+  void     *thread_result;
+  int       value;
+
+  // Put something meaningful into value.
+  value = 42;
+
+  // Create the thread, passing &value for the argument.
+  pthread_create(&thread_ID, NULL, thread_function, &value);
+
+  // The main program continues while the thread executes.
+
+  // Wait for the thread to terminate.
+  pthread_join(thread_ID, &thread_result);
+
+  // Only the main thread is running now.
+  return 0;
+}
+\end{lstlisting}
+
+
+The \snippet{pthread\_create()} function gives back a thread identifier that can be used in
+other calls. The second parameter is a pointer to a \newterm{thread attribute object} that you
+can use to set the thread's attributes. The null pointer means to use default attributes which
+is suitable for many cases. The third parameter is a pointer to the function the thread is to
+execute. The final parameter is the argument passed to the thread function. By using pointers to
+void here, any sort of data could potentially be passed provided proper casts are applied. In
+the skeleton example I show how a single integer can be used as a thread argument, but in
+practice one might send a pointer to a structure containing multiple arguments to the thread.
+
+At some point in your program you should wait for each thread to terminate and collect the
+result it produced by calling \snippet{pthread\_join()}. Alternatively you can create a detached
+thread. The results returned by such threads are thrown away. The problem with detached threads
+is that, unless you make special arrangements, you are never sure when they complete. Usually
+you want to make sure all your threads have terminated cleanly before you end the process by
+returning from \snippet{main()}.
+
+If you want to kill a thread before its thread function returns normally, you can use
+\snippet{pthread\_cancel()}. However, there are difficulties involved in doing that. You must be
+sure the thread has released any resources that it has obtained before it actually dies. For
+example if a thread has dynamically allocated memory and you cancel it before it can free that
+memory, your program will have a memory leak. This is different than when you kill an entire
+process. The operating system will typically clean up (certain) resources that are left dangling
+by the process. In particular, the entire address space of a process is recovered. However, the
+operating system will not do that for a thread since all the threads in a process share
+resources. For all the operating system knows, the memory allocated by one thread will be used
+by another thread. This situation makes canceling threads carelessly a bad idea.
+
+%
+% Write a chapter on thread cancellation and refer to it here?
+%
+
+\subsubsection*{Exercises}
+
+\begin{enumerate}
+
+\item Write a program that creates 10 threads. Have each thread execute the same function and
+  pass each thread a unique number. Each thread should print ``Hello, World (thread n)'' five
+  times where $n$ is replaced by the thread's number. Use an array of \snippet{pthread\_t}
+  objects to hold the various thread IDs. Be sure the program doesn't terminate until all the
+  threads are complete. Try running your program on more than one machine. Are there any
+  differences in how it behaves?
+
+\end{enumerate}
+
+\subsection{Returning Results from Threads}
+\label{subsec:returning-results}
+
+The example in the last section illustrated how you can pass an argument into your thread
+function if necessary. In this section I will describe how to return results from thread
+functions.
+
+Note that the thread functions are declared to return a pointer to \snippet{void}. However,
+there are some pitfalls involved in using that pointer. The code below shows one attempt at
+returning an integer status code from a thread function.
+
+\begin{lstlisting}
+void *thread_function(void *)
+{
+  int code = DEFAULT_VALUE;
+
+  // Set the value of 'code' as appropriate.
+
+  return (void *)code;
+}
+\end{lstlisting}
+
+This method will only work on machines where integers can be converted to a pointer and then
+back to an integer without loss of information. On some machines such conversions are dangerous.
+In fact this method will fail in all cases where one attempts to return an object, such as a
+structure, that is larger than a pointer.
+
+In contrast, the code below doesn't fight the type system. It returns a pointer to an internal
+buffer where the return value is stored. While the example shows an array of characters for the
+buffer, one can easily imagine it being an array of any necessary type, or a single object such
+as an integer status code or a structure with many members.
+
+\begin{lstlisting}
+void *thread_function(void *)
+{
+  char buffer[64];
+
+  // Fill up the buffer with something good.
+
+  return buffer;
+}
+\end{lstlisting}
+
+Alas, the code above fails because the internal buffer is automatic and it vanishes as soon as
+the thread function returns. The pointer given back to the calling thread points at undefined
+memory. This is another example of the classic dangling pointer error.
+
+In the next attempt the buffer is made static so that it will continue to exist even after the
+thread function terminates. This gets around the dangling pointer problem.
+
+\begin{lstlisting}
+void *thread_function(void *)
+{
+  static char buffer[64];
+
+  // Fill up the buffer with something good.
+
+  return buffer;
+}
+\end{lstlisting}
+
+This method might be satisfactory in some cases, but it doesn't work in the common case of
+multiple threads running the same thread function. In such a situation the second thread will
+overwrite the static buffer with its own data and destroy that left by the first thread. Global
+data suffers from this same problem since global data always has static duration.
+
+The version below is the most general and most robust.
+
+\begin{lstlisting}
+void *thread_function(void *)
+{
+  char *buffer = (char *)malloc(64);
+
+  // Fill up the buffer with something good.
+
+  return buffer;
+}
+\end{lstlisting}
+
+This version allocates buffer space dynamically. This approach will work correctly even if
+multiple threads execute the thread function. Each will allocate a different array and store the
+address of that array in a stack variable. Every thread has its own stack so automatic data
+objects are different for each thread.
+
+In order to receive the return value of a thread the higher level thread must join with the
+subordinate thread. This is shown in the \snippet{main} function of Listing~\ref{lst:skeleton}.
+In particular
+
+\begin{lstlisting}
+void *thread_result;
+
+// Wait for the thread to terminate.
+pthread_join(thread_ID, &thread_result);
+\end{lstlisting}
+
+The \snippet{pthread\_join()} function blocks until the thread specified by its first argument
+terminates. It then stores into the pointer pointed at by its second argument the value returned
+by the thread function. To use this pointer, the higher level thread must cast it into an
+appropriate type and dereference it. For example
+
+\begin{lstlisting}
+char *message;
+
+message = (char *)thread_result;
+printf("I got %s back from the thread.\n", message);
+free(thread_result);
+\end{lstlisting}
+
+If the thread function allocated the space for the return value dynamically then it is essential
+for the higher level thread to free that space when it no longer needs the return value. If this
+isn't done the program will leak memory.
+
+\subsubsection*{Exercises}
+
+\begin{enumerate}
+
+\item Write a program that computes the square roots of the integers from 0 to 99 in a separate
+  thread and returns an array of doubles containing the results. In the meantime the main thread
+  should display a short message to the user and then display the results of the computation
+  when they are ready.
+
+\item Imagine that the computations done by the program above were much more time consuming than
+  merely calculating a few square roots. Imagine also that displaying the "short message" was
+  also fairly time consuming. For example, perhaps the message needed to be fetched from a
+  network server as HTML and then rendered. Would you expect the multi-threaded program to
+  perform better than a single threaded program that, for example, did the calculations first
+  and then fetched the message? Explain.
+
+\end{enumerate}
+

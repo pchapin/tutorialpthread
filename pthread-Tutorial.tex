@@ -1,0 +1,110 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% FILE    : pthread-Tutorial.tex
+% AUTHOR  : (C) Copyright 2012 by Peter C. Chapin
+% SUBJECT : Tutorial on POSIX threads.
+%
+% This document attempts to give a quick overview of how to use the facilities of POSIX threads.
+% It is not intended to be a complete description of pthreads. Instead I only hope to introduce
+% the reader to the basic pthread operations. The hope is that there will be enough information
+% here to allow the reader to start using pthreads effectively without overwhelming the reader
+% with details.
+%
+% TODO:
+%
+% + Add some kind of reference or bibliography section.
+%
+% + Add some kind of glossary and/or list of abbreviations.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%+++++++++++++++++++++++++++++++++
+% Preamble and global declarations
+%+++++++++++++++++++++++++++++++++
+\documentclass{article}
+\usepackage{listings}
+%\usepackage[dvips]{graphics}
+\usepackage{hyperref}
+\setlength{\parindent}{0em}
+\setlength{\parskip}{1.75ex plus0.5ex minus0.5ex}
+
+% I want to typeset newly introduced terms in a special way.
+\newcommand{\newterm}[1]{\emph{#1}}
+
+% Used for bits of C in-line.
+\newcommand{\snippet}[1]{\texttt{#1}}
+
+%++++++++++++++++++++
+% The document itself
+%++++++++++++++++++++
+\begin{document}
+
+% The following are settings for the listings package.
+\lstset{language=C,
+        basicstyle=\small,
+        stringstyle=\ttfamily,
+        commentstyle=\ttfamily,
+        xleftmargin=0.25in,
+        showstringspaces=false}
+
+%-----------------------
+% Title page information
+%-----------------------
+\title{pthread Tutorial}
+\author{\copyright\ Copyright 2012 by Peter C. Chapin}
+\date{September 5, 2012}
+\maketitle
+
+\tableofcontents
+
+\section*{Legal}
+\label{sec:legal}
+
+\textit{Permission is granted to copy, distribute and/or modify this document under the terms of
+  the GNU Free Documentation License, Version 1.1 or any later version published by the Free
+  Software Foundation; with no Invariant Sections, with no Front-Cover Texts, and with no
+  Back-Cover Texts. A copy of the license is included in the file \texttt{GFDL.txt} distributed
+  with the \LaTeX\ source of this document.}
+
+\section{Introduction}
+\label{sec:intro}
+
+This document is intended to be a short but useful tutorial on how to use POSIX threads
+(pthreads). In this document I do not attempt to give a full description of all pthread
+features. Instead I hope to give you enough information to use pthreads in a basic, yet
+effective way. Please refer to a text on pthreads for the more esoteric details of the standard.
+
+In addition to talking about the pthread interface itself, I also spend time in this document
+discussing issues regarding concurrent programming in general. While such issues are not
+specific to pthreads, it is a must that you understand them if you are to use pthreads---or any
+thread library---effectively.
+
+I will assume that you are compiling pthreads programs on a Unix system. However, you should be
+aware that the pthreads interface is not necessarily specific to Unix. It is a standard
+application program interface that could potentially be implemented on many different systems.
+However, pthreads is the usual way multi-threaded support is offered in the Unix world. Although
+many systems support their own internal method of handling threads, virtually every Unix system
+that supports threads at all offers the pthreads interface.
+
+The pthreads API can be implemented either in the kernel of the operating system or in a
+library. It can either be preemptive or it can be non-preemptive. A portable program based on
+pthreads should not make any assumptions about these matters.
+
+When you compile a program that uses pthreads, you will probably have to set special options on
+the compiler's command line to indicate extra (or different) libraries and/or alternative code
+generating stratagies. Consult your compiler's documentation for more information on this. Often
+you can indicate your desire to use pthreads by supplying the ``-pthread'' option at the end of
+the compiler command line. For example
+
+\begin{verbatim}
+$ gcc -o myprog myprog.c -pthread
+\end{verbatim}
+
+This single option specifies that the pthreads library should be linked and also causes the
+compiler to properly handle the multiple threads in the code that it generates.
+
+\input{create-destroy.tex}
+\input{sync.tex}
+\input{models.tex}
+\input{safety.tex}
+\input{rules.tex}
+
+\end{document}

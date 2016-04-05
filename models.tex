@@ -1,0 +1,184 @@
+
+\section{Thread Models}
+\label{sec:thread-models}
+
+In this section I will describe some ways that threads can be used in real programs. The goal is
+to give you a feeling for the kind of design ideas that lend themselves to a threaded solution.
+It is usually possible to build a single threaded program that solves the same problem, but in
+some cases the single threaded solution is awkward and difficult to manage. Be aware, however,
+that single threaded solutions are often the most appropriate. There can be a significant amount
+of overhead associated with synchronizing threads; multiple threads, poorly applied, can easily
+result in a slower and more confusing program.
+
+\subsection{Boss/Worker Model}
+\label{subsec:bossworker-model}
+
+The idea in the boss/worker model is to have a single \newterm{boss} thread that creates work
+and several \newterm{worker} threads that process the work. Typically the boss thread creates a
+certain number of workers right away---even before any work has arrived. The worker threads form
+a \newterm{thread pool} and are all programmed to block immediately. When the boss thread
+generates some work, it arranges to have one worker thread unblock to handle it. Should all
+workers be busy the boss thread might
+
+\begin{enumerate}
+  
+\item Queue up the work to be handled later as soon as a worker is free.
+
+\item Create more worker threads.
+
+\item Block until a worker is free to take the new work.
+
+\end{enumerate}
+
+If no work has arrived recently and there are an excessive number of worker threads in the
+thread pool, the boss thread might terminate a few of them to recover resources. In any case,
+since creating and terminate threads is relatively expensive (compared to, say, blocking on a
+mutex) it is generally better to avoid creating a thread for each unit of work produced.
+
+You have already seen this model in action many times. Consider a bank. When you arrive you have
+work that needs doing. You get in a queue and wait for a free teller (worker thread). When a
+teller is available that teller handles your work while other tellers are handling other work at
+the same time. Should someone in line have an unusually complicated transaction, it won't hold
+up the line. Only one teller will be tied up dealing with the large work item. The other tellers
+will be available to handle other people's work normally. Thus the response time is reasonable
+even when some work items are very time consuming.
+
+A web server is another excellent example of where the boss/worker model can be used. The boss
+thread listens to the network for incoming connections. When a connection is made, the boss
+thread directs a worker thread to handle that connection. The boss thread then returns to
+listening to the network again. In this way many connections can be handled at once. If a
+particularly time consuming connection is active, it won't prevent the program for dealing with
+other connections as well.
+
+This model works the best when the work items are independent of each other. If the work items
+depend on each other or have to be processed in a particular sequence the worker threads have to
+talk to each other and the overall efficiency of this model is much reduced. Also, if you run a
+boss/worker program on a single processor machine it is important that servicing a work item
+involves a fair amount of blocking. If the work items are all 100\% CPU bound then there won't
+be any performance enhancement. A single thread servicing all the items in sequence would be
+just as fast as having multiple threads servicing several items at once. However, if servicing
+an item requires a lot of blocking, or if multiple CPUs are available, then another thread can
+use the CPU while the first is blocked and the overall performance is better (often drastically
+so).
+
+\subsection{Pipeline Model}
+\label{subsec:pipeline-model}
+
+Many programs take some input, transform it in several stages, and then output the result.
+Instead of having a single thread perform each step in sequence you could have a separate thread
+handling each stage. The result is much like an assembly line. The data flows from one worker to
+another and each worker performs their particular operation on the data. By the time the data
+reaches the end of the line it has been fully transformed into the desired output.
+
+Usually writing a single threaded program to process sequential data in stages is fairly
+straightforward. However, a multithreaded pipeline has the potential to outperform the single
+threaded solution. In general, if there are $N$ stages to the pipeline there can be $N$ items
+being operated on at once by the multithreaded program and the result will be $N$ times faster.
+In practice it rarely works out this well. To obtain its full efficiency the time required for
+every stage must be identical and the processing of one stage can't in any way slow down the
+processing of the others. If the program runs on a single processor the operations being done in
+each stage must block frequently so that the CPU can execute another stage while the blocked
+stages are waiting (for example, for I/O).
+
+To balance the load between the stages, the programmer might need to use profiling tools to find
+out the relative time used by the different stages. Stages that are very short can be combined
+with the stage on either side while stages that are very long can be split into multiple stages
+(ideally with blocking operations divided evenly between the stages). Getting this balance just
+right is difficult yet without it the multithreaded solution to the pipeline model will hardly
+be any faster than the single threaded solution. In fact, because of locking overhead, it may
+even be slower\footnote{The buffers between the stages must be careful to avoid race conditions
+  and overflow/underflow conditions. This involves a significant amount of locking activity.}.
+
+\subsection{Background Task Model}
+\label{subsec:background-model}
+
+Many programs have tasks that they would like to complete ``in the background.'' For example a
+program might want to backup its data files every 10 minutes or update a special status window
+every 5 seconds. It is awkward to program such things with only a single thread. The program
+must remember to check the time regularly and call the background function whenever an
+appropriate amount of time has elapsed. Since that might happen at any point in the program's
+execution, the program's logic must be littered with calls to functions that are largely
+unrelated to the main flow of the program.
+
+With multiple threads, however, this model is quite easy to program. A background thread can be
+created when the program initializes itself. That thread can sleep for a certain fixed time and
+then, when it wakes up, perform the necessary background operation. The thread would then just
+loop back and sleep again until the next time interval has expired. This can happen
+independently of the main program's logic. The main complication involved with programming this
+model is in making sure that the background thread is properly synchronized with the main thread
+when they access shared data.
+
+In this approach the threads are used in a manner similar to the way interrupt service routines
+are used. They provide background services that the main program does not have to explicity
+invoke. Many useful tasks can be effectively handled in this way.
+
+\subsection{Interface/Implementation Model}
+\label{subsec:interface-model}
+
+Most graphical environments are event driven. Each action taken by the user is a separate event
+that the program must handle. Examples of events include mouse clicks, menu selections,
+keystrokes, and so forth. Typically the program contains a single function that is called by the
+system whenever an event happens. That function must process the event and then return before
+the system calls the function with the next event. If the event handling function does not
+return quickly enough events will back up and the user will perceive the program as unresponsive
+and sluggish. In an extreme case the program will even appear to be dead.
+
+To avoid this the program can use multiple threads. If handling an event is going to be time
+consuming and difficult (and involve a lot of blocking), the event handling function can just
+create a thread to deal with it and then return at once. This gives the event handling function
+the opportunity to handle additional events while past events are being processed by other
+threads. The result is that the program's interface remains responsive even if some of the
+operations requested are very time consuming.
+
+It is not necessary for an entire program to be organized this way. Internal modules in a
+program can use the same trick. When a function is called in such a module, the function might
+create a thread to carry out the requested operation and then return at once. The calling
+program will see the function as very quick and responsive even though the actual work requested
+hasn't really been completed when the function returns.
+
+The difficulty with this model is that eventually the user of an interface will need to know for
+sure when certain operations requested in the past have actually completed. Some way of
+coordinating that information must be provided. Also it is difficult for the program to report
+errors effectively with this model because an error might occur long after the operation was
+requested and apparently handled.
+
+Many operating systems themselves use this model extensively. For example, when a program writes
+to a file, the file is typically not put onto the disk at once. Instead it is just put into a
+cache (faster) and written to disk latter when the system is less busy. In effect, the operating
+system writes to disk in a separate thread that is independent of the thread that actually
+requested the write operation in the first place.
+
+\subsection{General Comments}
+\label{subsec:general-model}
+
+In general, multithreaded programs work best if the threads are as independent as possible. The
+less the threads have to communicate with each other the better. Whenever threads have to
+synchronize or share data there will be locking overhead and time spent waiting for other
+threads. Time blocked while waiting for another thread is time wasted. Such a thread is not
+doing anything useful. In contrast, if a thread is blocked waiting for I/O it is doing something
+that the program needs done. Such blocking is good because it allows other threads to get the
+CPU. But if a thread waits for another thread then it is not accomplishing anything that the
+program needs. The more threads interact with each other the more time they will spend waiting
+for each other and the more inefficient the program will be.
+
+It is easy to understand this idea when you think about working with another person on a common
+project. If you and your partner can do two largely independent activities you can both work
+without getting in each other's way and you can get twice as much work done. But if you try to
+work too closely then one of you will simply be waiting for the other and the work won't get
+done any more quickly than it would by a single person alone. Consider what would happen if you
+decided to type a paper with your partner but that you and your partner had to alternate
+keystrokes on the keyboard. To type ``Hello'' first you type `H' then your partner types `e'
+then you type `l' and so on. Obviously this would be very inefficient. You would spend more time
+getting the alternation right than you would actually typing keys. The exact same issues arise
+in multithreaded programs. An improperly written multithreaded program can be slower---sometimes
+a lot slower---than its single threaded equivalent.
+
+If two tasks are very independent, they can often be handled by two entirely separate processes.
+Large software systems are often composed of many executable files, each taking care of a single
+aspect of the system. At this level the system is ``multithreaded'' even if the individual
+programs are not. However, it can be difficult for multiple processes to share information
+effectively. Putting multiple threads into a single process makes the parallelism more
+\newterm{fine grained}, allows the threads to interact more closely, and share more resources.
+This can be a good thing. But if taken to extreme it causes inefficiencies as I described above.
+A good multithreaded program will strike the right balance between sharing and independence.
+That balance is often difficult to find.

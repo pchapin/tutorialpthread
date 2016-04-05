@@ -1,0 +1,178 @@
+
+\section{Thread Safety}
+\label{sec:thread-safety}
+
+Typically when a complicated object is operated on, it goes through several intermediate,
+invalid states before the operation is complete. As an analogy consider what a surgeon does when
+he operates on a person. Although the purpose of the operation is to increase the patient's
+health, the surgeon performs several steps that would greatly decrease the patient's health if
+they were left incomplete! Similarly a function that operates on an object will often temporary
+put that object into an unusable state while it performs the update. Once the update is
+complete, the function (if written correctly) will leave the object is a fully functional state
+again.
+
+Should another thread try to use an object while it is in an unusable state (often called an
+\newterm{inconsistent state}) the object will not respond properly and the result will be
+undefined. Keeping this from happening is the essential problem of thread safety. The problem
+doesn't come up in a single threaded program because there is no possibility of another thread
+trying to access the object while the first thread is updating it\footnote{Unless exceptions are
+  a possibility. In that case the updating thread might abort the update and then later try to
+  access the incompletely updated object. This causes the same sort of problems to occur.}.
+
+\subsection{Levels of Thread Safety}
+\label{subsec:levels-safety}
+
+People often have problems discussing thread safety because there are many different levels of
+safety one might want to talk about. Just saying that a piece of code is ``thread safe'' doesn't
+really say all that much. Yet most people have certain natural expectations about thread safety.
+Sometimes those expectations are reasonable and valid, but sometimes they are not. Here are some
+of those expectations.
+
+\begin{itemize}
+  
+\item Reading an object's value with multiple threads is not normally expected to be a problem.
+  Problems only occur when an object is updated since it is only then that it has to be modified
+  and run the risk of entering inconsistent states.
+  
+  \emph{However} some objects have internal state that gets modified even when its value is read
+  (think about an object that has an internal cache). If two threads try to read such an object
+  there might be problems unless the read operations on that object have been designed to handle
+  the multiple threads properly.
+  
+\item Updating two independent objects, even of the same type, is not normally expected to be a
+  problem. It is usually assumed that objects that appear to be independent are, in fact,
+  independent and thus the inconsistent states of one such object have no impact on the other.
+  
+  \emph{However} some objects share information behind the scenes (static class data, global
+  data, etc) that causes them to be linked internally even when they do not appear to be linked
+  from a logical point of view. In that case, modifying two ``independent'' objects might cause
+  a problem anyway. Consider:
+
+\begin{lstlisting}
+void f()                    void g()
+{                           {
+  std::string x;              std::string y;
+
+  // Modify x.                // Modify y.
+}                           }
+\end{lstlisting}
+  
+If one thread is in function \snippet{f()} modifying the string \snippet{x} and another is in
+function \snippet{g()} modifying string \snippet{y}, will there be a problem? Most of the time
+you can assume that the two apparently independent objects can be simultaneously modified
+without synchronization. But it is possible, depending on how \snippet{std::string} is
+implemented, that the two objects share some data internally and that simultaneous modifications
+\emph{will} cause a problem. In fact, even if one of the functions merely reads the value of the
+string, there might be a problem if they share internal data that is being updated by the other
+function.
+  
+\item Functions that acquire resources, even if from a common pool of resources, are not
+  normally expected to be a problem. Consider:
+
+\begin{lstlisting}
+void f()                    void g()
+{                           {
+  char *p = new char[512];    char *p = new char[512];
+
+  // Use the array p.         // Use the array p.
+}                           }
+\end{lstlisting}
+  
+If one thread is in function \snippet{f()} and another thread is in function \snippet{g()}, both
+threads might try to allocate memory simultaneously by invoking the \snippet{new} operator. In a
+multi-threaded environment, it is safe to assume that \snippet{new} has been written to work
+correctly in this case even though both invocations of \snippet{new} are trying to take memory
+from the same pool of memory. Internally \snippet{new} will synchronize the threads so that each
+call will return a unique allocation and the internal memory pool will not be corrupted. Similar
+comments can be made about functions that open files, make network connections, and perform
+other resource allocation tasks.
+  
+\emph{However} if the resource allocation functions are not designed with threads in mind then
+they may well fail if invoked by multiple threads at once.
+
+\end{itemize}
+
+What people typically expect to cause problems is when a program tries to access (update or
+read) an object while another thread is updating that same object. Global objects are
+particularly prone to this problem. Local objects are much less so. For example:
+
+\begin{lstlisting}
+std::string x;
+
+void f()
+{
+  std::string y;
+
+  // Modify x and y.
+}
+\end{lstlisting}
+
+If two threads enter function \snippet{f()} at the same time, they will get different versions
+of the string \snippet{y}. This is because every thread has its own stack and local objects are
+allocated on the thread's stack. Thus every thread has its own, independent copy of the local
+objects. As a result, manipulating \snippet{y} inside \snippet{f()} will not cause a problem
+(assuming that manipulating independent objects is safe). However, since there is only one copy
+of the global \snippet{x} that both threads will be touching, there could be a problem caused by
+those operations.
+
+Local objects are not immune to problems since any function can start a new thread and pass a
+pointer to a local object as a parameter to that thread. For example
+
+\begin{lstlisting}
+void f()
+{
+  std::string x;
+
+  start_thread(some_function, &x);
+  start_thread(some_function, &x);
+}
+\end{lstlisting}
+
+Here I assume there is a library function named \snippet{start\_thread()} that accepts a pointer
+to a thread function (defined elsewhere) and a pointer to a parameter for that function. In this
+case I start two threads executing \snippet{some\_function()}, giving both of them a pointer to
+the string \snippet{x}. If \snippet{some\_function()} tries to modify that string then two
+threads will be modifying the same object and problems are likely. Note that this case is
+particularly insidious because \snippet{some\_function()} has no particular reason to expect
+that it will be given the same parameter twice. Thus it is unlikely to have any protection to
+handle such a case.
+
+\subsection{Writing Thread Safe Code}
+\label{subsec:writing-safety}
+
+In theory the only way to control the actions of a thread is to use synchronization primitives
+such as mutexes or semaphores. In languages that provide threads as a part of the language,
+synchronization primitives of some kind are normally provided by the language itself. In other
+cases, such as with C, they are library functions, such as the POSIX API described in this
+tutorial, that interact with the operating system.
+
+Normally you should write code that meets the usual expectations that people have about thread
+safe code. If you are implementing a C++ class, make sure that multiple simultaneous reads on an
+object are safe. If you do update internal data behind the caller's back, you will probably have
+to protect those updates yourself. Also make sure the simultaneous writes to independent objects
+are safe. If you do make use of shared data, you will probably have to protect updates to that
+shared data yourself. If you write a function that manages shared resources for multiple threads
+from a common pool of such resources, you will probably have to protect the resource pool from
+corruption by multiple, simultaneous requests. However, in general, you probably don't have to
+bother protecting every single object against simultaneous updates. Let the calling program
+worry about that case. Such total safety is usually very expensive in terms of runtime
+efficiency and not normally necessary or even appropriate.
+
+\subsection{Exception Safety vs Thread Safety}
+\label{exception-safety}
+
+Both thread and exception safety share a number of common issues. Both are concerned with
+objects that are in an inconsistent state. Both have to think about resources (although in
+different ways... exception safety is concerned with resource leaks, thread safety is concerned
+with resource corruption). Both have several levels of safety that could be defined along with
+some common expectations about what is and is not safe.
+
+However, there is one important difference between the exception safety and thread safety.
+Exceptions occur synchronously with the program's execution while threads are asynchronous. In
+other words, exceptions occur, in theory, only at certain well defined times. Although it is not
+always clear which operations might throw an exception and which might not, in theory it is
+possible to precisely define exactly when an exception might happen and when it can't happen. As
+a result it is often possible to make a function exception safe by just reorganizing it. In
+contrast there is no way to control when two threads might clash. Reorganizing a function is
+rarely helpful when it comes to making it thread safe. This difference makes thread related
+errors difficult to reproduce and difficult to manage.

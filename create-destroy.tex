@@ -5,8 +5,8 @@
 Clearly the first step required in understanding how to build a multi-threaded program is to
 understand how to create and destroy threads. There are a number of subtle issues associated
 with this topic. Normally one wants to not only create a thread but also to send that thread one
-or more parameters. Furthermore when a thread ends, one normally wants to be able to retrieve one
-or more values that are returned from the thread. In this section I will describe how these
+or more parameters. Furthermore when a thread ends, one normally wants to be able to retrieve
+one or more values that are returned from the thread. In this section I will describe how these
 things can be done with pthreads.
 
 \subsection{Creating Threads}
@@ -72,7 +72,9 @@ result it produced by calling \snippet{pthread\_join()}. Alternatively you can c
 thread. The results returned by such threads are thrown away. The problem with detached threads
 is that, unless you make special arrangements, you are never sure when they complete. Usually
 you want to make sure all your threads have terminated cleanly before you end the process by
-returning from \snippet{main()}.
+returning from \snippet{main()}. Returning from \snippet{main()} will cause any running threads
+to be abruptly aborted. While this might be appropriate in some cases, it runs the risk of
+leaving critical work being done by a thread only partially completed.
 
 If you want to kill a thread before its thread function returns normally, you can use
 \snippet{pthread\_cancel()}. However, there are difficulties involved in doing that. You must be
@@ -83,7 +85,7 @@ process. The operating system will typically clean up (certain) resources that a
 by the process. In particular, the entire address space of a process is recovered. However, the
 operating system will not do that for a thread since all the threads in a process share
 resources. For all the operating system knows, the memory allocated by one thread will be used
-by another thread. This situation makes canceling threads carelessly a bad idea.
+by another thread. This situation makes it difficult to canceling threads properly.
 
 %
 % Write a chapter on thread cancellation and refer to it here?
@@ -165,8 +167,8 @@ void *thread_function(void *)
 
 This method might be satisfactory in some cases, but it doesn't work in the common case of
 multiple threads running the same thread function. In such a situation the second thread will
-overwrite the static buffer with its own data and destroy that left by the first thread. Global
-data suffers from this same problem since global data always has static duration.
+overwrite the static buffer with its own data and destroy the data left by the first thread.
+Global data suffers from this same problem since global data always has static duration.
 
 The version below is the most general and most robust.
 

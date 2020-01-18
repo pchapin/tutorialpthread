@@ -13,7 +13,7 @@ common methods of thread synchronization and show how they can be done using POS
 When writing multi-threaded programs it is frequently necessary to enforce mutually exclusive
 access to a shared data object. This is done with mutex objects. The idea is to associate a
 mutex with each shared data object and then require every thread that wishes to use the shared
-data object to first lock the mutex before doing so. Here are the particulars
+data object to first lock the mutex before doing so. Here are the particulars:
 
 \begin{enumerate}
 
@@ -43,7 +43,7 @@ Example},label=lst:mutex-example]
 
 pthread_mutex_t lock;
 int shared_data;
-  // Often shared data is more complex than just an int.
+  // Usually shared data is more complex than just an int.
 
 void *thread_function(void *arg)
 {
@@ -90,7 +90,7 @@ The code above uses dynamic initialization. However, it is also possible to init
 object statically using the special symbol \snippet{PTHREAD\_\-MUTEX\_\-INITIALIZER} as the
 initializer.
 
-Be sure to observe these points
+Be sure to observe these points:
 
 \begin{enumerate}
 
@@ -114,6 +114,12 @@ program in Listing~\ref{lst:mutex-example} just calls for default attributes by 
 \snippet{NULL} pointer instead. In many cases this is perfectly adequate. The use of mutex
 attribute objects is beyond the scope of this document.
 
+It is important to understand that mutex locking is \newterm{advisory}. This means that no part
+of the system (the operating system, the runtime system, or any other system) \emph{requires}
+that you follow the rules. If you forget to lock a mutex before accessing the protected shared
+data, your thread might interfere with the activity of another thread\ldots even a thread that
+has played by the rules and locked the mutex first.
+
 \subsubsection*{Exercises}
 
 \begin{enumerate}
@@ -135,8 +141,8 @@ attribute objects is beyond the scope of this document.
 \label{subsec:barriers}
 
 A barrier is a synchronization primitive that forces multiple threads to reach the same point in
-the program before they are allowed to continue. If a thread arrives at the barrier early it
-will be suspended until the appropriate number of other threads arrive. Once the last thread has
+the program before any are allowed to continue. If a thread arrives at the barrier early it will
+be suspended until the appropriate number of other threads arrive. Once the last thread has
 reached the barrier, all the waiting threads are released and the threads can proceed
 concurrently once again.
 
@@ -161,6 +167,7 @@ void *thread_function(void *arg)
   while (!done) {
     for (i = thread_arg->start; i < thread_arg->end; ++i) {
       // Work on loop iteration i
+      // Each thread gets a separate TaskArg.
       // Different threads do different iterations.
     }
 
@@ -187,9 +194,9 @@ The other threads immediately wait on the next barrier for the serial thread to 
 the preparation is fully completed, they are all released from the second barrier where they
 loop back to do the next cycle of work.
 
-This style of programming occurs frequently when writing truly parallel programs that expect
-the threads to be physically executing at the same time. Such programs often use multiple
-threads to complete different parts of the same task and use a barrier to be sure the task is
+This style of programming occurs frequently when writing truly parallel programs that expect the
+threads to be physically executing at the same time. Such programs often use multiple threads to
+complete different parts of the same task and use a barrier to be sure the complete task is
 finished before allowing the higher level program logic to continue.
 
 Barriers are instances of the \snippet{pthread\_barrier\_t} type. They are initialized with
@@ -237,14 +244,14 @@ int main(void)
 \end{lstlisting}
 
 The barrier objects themselves are global so they can be accessed by all threads. Alternatively
-they could have been made local to the main function and passed into each thread indirectly by
-way of the thread's arguments. In any case it is necessary for all threads to see the same
-barrier object.
+they could have been made local to the main function and passed into each thread indirectly (i.
+e., with a pointer) by way of the thread's arguments. In any case, it is necessary for all
+threads to see the same barrier object.
 
 When the barrier objects are initialized it is necessary to provide the number of threads that
-can accumulate on the barrier. For example a barrier initialized with a count of five will cause
-threads to wait until the fifth thread arrives. This count can't be changed once the barrier
-object has been initialized.
+can accumulate on the barrier. For example, a barrier initialized with a count of five will
+cause threads to wait until the fifth thread arrives. This count can't be changed once the
+barrier object has been initialized.
 
 This listing creates as many threads as there are processors using a previously defined variable
 \snippet{processor\_count} (declaration not shown). Since the number of processors is unknown

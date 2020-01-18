@@ -18,7 +18,7 @@ and several \newterm{worker} threads that process the work. Typically the boss t
 certain number of workers right away---even before any work has arrived. The worker threads form
 a \newterm{thread pool} and are all programmed to block immediately. When the boss thread
 generates some work, it arranges to have one worker thread unblock to handle it. Should all
-workers be busy the boss thread might
+workers be busy the boss thread might:
 
 \begin{enumerate}
   
@@ -47,7 +47,7 @@ A web server is another excellent example of where the boss/worker model can be 
 thread listens to the network for incoming connections. When a connection is made, the boss
 thread directs a worker thread to handle that connection. The boss thread then returns to
 listening to the network again. In this way many connections can be handled at once. If a
-particularly time consuming connection is active, it won't prevent the program for dealing with
+particularly time consuming connection is active, it won't prevent the server for dealing with
 other connections as well.
 
 This model works the best when the work items are independent of each other. If the work items
@@ -123,7 +123,7 @@ the system calls the function with the next event. If the event handling functio
 return quickly enough events will back up and the user will perceive the program as unresponsive
 and sluggish. In an extreme case the program will even appear to be dead.
 
-To avoid this the program can use multiple threads. If handling an event is going to be time
+To avoid this, the program can use multiple threads. If handling an event is going to be time
 consuming and difficult (and involve a lot of blocking), the event handling function can just
 create a thread to deal with it and then return at once. This gives the event handling function
 the opportunity to handle additional events while past events are being processed by other

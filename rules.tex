@@ -113,11 +113,11 @@ You can count on the following:
   thread-safe. There are a few exceptions which are documented as part of the standard.
 
 \item Under Windows the C standard library is totally thread safe provided you use the correct
-  version of the library and you initialize it properly.
+  version of the library and you initialize it properly (if required).
 
-\item The thread safety of the C++ standard library is vague and very much dependent on the
-  compiler you are using. The SGI criteria for thread safety of the standard template library is
-  gaining ground as the defacto standard. It is not universal.
+\item C++ 1998 does not discuss threads so The thread safety of the C++ standard library is
+  vague and dependent on the compiler you are using. This has been corrected with the C++ 2011
+  (or later) standard which supports threads as part of the standard.
 
 \end{enumerate}
 

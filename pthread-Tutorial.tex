@@ -1,13 +1,13 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % FILE    : pthread-Tutorial.tex
-% AUTHOR  : (C) Copyright 2012 by Peter C. Chapin
+% AUTHOR  : (C) Copyright 2020 by Peter C. Chapin
 % SUBJECT : Tutorial on POSIX threads.
 %
 % This document attempts to give a quick overview of how to use the facilities of POSIX threads.
-% It is not intended to be a complete description of pthreads. Instead I only hope to introduce
-% the reader to the basic pthread operations. The hope is that there will be enough information
-% here to allow the reader to start using pthreads effectively without overwhelming the reader
-% with details.
+% It is not intended to be a complete description of pthreads. Instead I only intend to
+% introduce the reader to basic pthread operations. The hope is that there will be enough
+% information here to allow the reader to start using pthreads effectively without overwhelming
+% the reader with details.
 %
 % TODO:
 %
@@ -49,8 +49,8 @@
 % Title page information
 %-----------------------
 \title{pthread Tutorial}
-\author{\copyright\ Copyright 2012 by Peter C. Chapin}
-\date{September 5, 2012}
+\author{\copyright\ Copyright 2020 by Peter C. Chapin}
+\date{January 18, 2020}
 \maketitle
 
 \tableofcontents
@@ -88,8 +88,8 @@ The pthreads API can be implemented either in the kernel of the operating system
 library. It can either be preemptive or it can be non-preemptive. A portable program based on
 pthreads should not make any assumptions about these matters.
 
-When you compile a program that uses pthreads, you will probably have to set special options on
-the compiler's command line to indicate extra (or different) libraries and/or alternative code
+When you compile a program that uses pthreads, you may have to set special options on the
+compiler's command line to indicate extra (or different) libraries and/or alternative code
 generating stratagies. Consult your compiler's documentation for more information on this. Often
 you can indicate your desire to use pthreads by supplying the ``-pthread'' option at the end of
 the compiler command line. For example
@@ -106,5 +106,25 @@ compiler to properly handle the multiple threads in the code that it generates.
 \input{models.tex}
 \input{safety.tex}
 \input{rules.tex}
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+Using multiple threads has the potential to improve your program's performance. Even on a single
+processor system, performance might be increased because one thread can execute while another is
+blocked waiting on I/O (for example). Also, used appropriately, multiple threads can allow for
+some elegant designs that can clarify and simplify the architecture of your system.
+
+The pthreads API is a relatively low level API that offers the usual features of such APIs: it
+is flexible and powerful, but also verbose and hard to use properly. Higher level thread APIs
+exist, often built on top of the pthreads API, that are easier to use correctly but sacrifice
+some of the flexibility and generality of pthreads.
+
+This document was prepared to support my classes at Vermont Technical College. However, I offer
+it to the public for general consumption on the hope that others might find it useful. Please
+don't hesitate to send me corrections or comments or suggestions for improvements or new
+sections. I can be reached at \href{mailto:pchapin@vtc.edu}{pchapin@vtc.edu}.
+
+Peter Chapin
 
 \end{document}
